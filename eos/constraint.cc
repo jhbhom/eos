@@ -27,6 +27,8 @@
 #include <eos/utils/stringify.hh>
 #include <eos/utils/wrapped_forward_iterator-impl.hh>
 
+#include <gsl/gsl_matrix.h>
+
 #include <cmath>
 #include <map>
 #include <vector>
@@ -535,6 +537,125 @@ namespace eos
 
             return os;
         }
+    };
+
+    template <size_t dim_>
+    struct NewMultivariateGaussianBlock:
+            public ConstraintEntryBase
+    {
+        std::vector<QualifiedName> observable_names;
+
+        std::vector<Kinematics> kinematics;
+
+        std::vector<Options> options;
+
+	gsl_matrix * cov_matrix;
+      
+        std::array<double, dim_> means;
+
+        unsigned number_of_observations;
+
+        std::array<std::array<double, dim_>, dim_> correlation;
+            
+	/*
+        std::array<double, dim_> sigma_stat_hi;
+        std::array<double, dim_> sigma_stat_lo;
+
+        std::array<double, dim_> sigma_sys;
+
+        std::array<std::array<double, dim_>, dim_> correlation;
+
+        unsigned number_of_observations;
+      */
+        NewMultivariateGaussianBlock(const QualifiedName & name,
+                const std::vector<QualifiedName> & observable_names,
+		const std::vector<Kinematics>& kinematics,
+                const std::vector<Options> & options,
+                const std::vector<double> & means,
+		const gsl_matrix * cov_matrix,
+		const unsigned number_of_observations = dim_) :		     
+
+                /*
+	        const std::array<double, dim_> & means,
+                const std::array<double, dim_> & sigma_stat_hi,
+                const std::array<double, dim_> & sigma_stat_lo,
+                const std::array<double, dim_> & sigma_sys,
+                const std::array<std::array<double, dim_>, dim_> & correlation,
+                const unsigned number_of_observations = dim_) :
+		*/
+	
+	    ConstraintEntryBase(name, observable_names),
+            observable_names(observable_names),
+            kinematics(kinematics),
+            options(options),
+            means(means),
+	    cov_matrix(cov_matrix),
+     	    number_of_observations(number_of_observations)
+							       
+	    /*
+	    sigma_stat_hi(sigma_stat_hi),
+            sigma_stat_lo(sigma_stat_lo),
+            sigma_sys(sigma_sys),
+            correlation(correlation),
+            number_of_observations(number_of_observations)
+	    */
+	// matrix(matrix)
+        {
+	  // here store the observables
+
+	  
+        }
+
+        virtual ~NewMultivariateGaussianBlock() = default;
+
+        virtual const std::string & type() const
+        {
+            static const std::string type("MultivariateGaussian<" + stringify(dim_) + "> (using correlation matrix)");
+
+            return type;
+        }
+
+        virtual Constraint make(const QualifiedName & name, const Options & options) const
+        {
+            Parameters parameters(Parameters::Defaults());
+            ObservableCache cache(parameters);
+
+            std::array<ObservablePtr, dim_> observables;
+            for (auto i = 0u ; i < dim_ ; ++i)
+            {
+                observables[i] = Observable::make(this->observable_names[i], parameters, this->kinematics[i], this->options[i] + options);
+                if (! observables[i].get())
+                    throw InternalError("make_newmultivariate_gaussian_constraint<" + stringify(dim_) + ">: " + name.str() + ": '" + this->observable_names[i].str() + "' is not a valid observable name");
+            }
+
+            std::array<double, dim_> variances;
+
+	    for(int i=0 ; i<dim_ ;++i)
+	      {
+		variances[i]=gsl_matrix_get (cov_matrix, i, i);
+	      }
+      // translating cov matrix to correlation matrix
+      for(int i=0;i<dim_; ++i)
+	{
+	  for(int j=0;j<dim_;++j)
+	    {
+	      correlation[i][j]==gsl_matrix_get(cov_matrix, i, j)/(sqrt(variances[i])*sqrt(variances[j]));   
+	    }
+	}
+	    
+            LogLikelihoodBlockPtr block = LogLikelihoodBlock::MultivariateGaussian(cache, observables, this->means, variances, this->correlation, number_of_observations);
+
+            return Constraint(name, std::vector<ObservablePtr>(observables.begin(), observables.end()), { block });
+        }
+
+        virtual std::ostream & insert(std::ostream & os) const
+        {
+            os << _name.full() << ":" << std::endl;
+            os << "    type: MultivariateGaussian<" << dim_ << ">" << std::endl;
+
+            return os;
+        }
+
     };
 
     template <size_t dim_>
